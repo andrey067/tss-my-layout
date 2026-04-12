@@ -13,11 +13,10 @@ from datetime import datetime
 
 from PIL import ImageDraw
 
-from docker_info import docker_ports_map, resolve_port
+from docker_info import docker_ports_map, only_ports, resolve_port
 from shared import (
     BG_PANEL,
     BORDER,
-    CYAN,
     FONT_BIG,
     FONT_DATA,
     FONT_SMALL,
@@ -47,6 +46,7 @@ class UptimeKumaScreen:
         kuma_verify_ssl=True,
         kuma_max_rows=18,
         show_docker_ports=True,
+        hide_no_port_rows=True,
     ):
         self.kuma_enabled = kuma_enabled
         self.kuma_url = kuma_url
@@ -56,6 +56,7 @@ class UptimeKumaScreen:
         self.kuma_verify_ssl = kuma_verify_ssl
         self.kuma_max_rows = kuma_max_rows
         self.show_docker_ports = show_docker_ports
+        self.hide_no_port_rows = hide_no_port_rows
         self.cache = {
             "summary": {"up": 0, "down": 0, "paused": 0, "unknown": 0, "total": 0},
             "monitors": [],
@@ -64,6 +65,65 @@ class UptimeKumaScreen:
             "updated_at": "Never",
             "last_fetch": 0.0,
         }
+
+    def _monitor_port_hint(self, row):
+        direct_candidates = [
+            row.get("port"),
+            row.get("monitor_port"),
+            row.get("docker_port"),
+            row.get("publicPort"),
+            row.get("hostPort"),
+        ]
+        for value in direct_candidates:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text or text.lower() == "null":
+                continue
+            parsed = only_ports(text)
+            if parsed:
+                return parsed
+
+        for field in ("url", "hostname"):
+            value = row.get(field)
+            if not value:
+                continue
+            parsed = only_ports(str(value).strip())
+            if parsed:
+                return parsed
+        return ""
+
+    def _normalize_name(self, value):
+        return re.sub(r"[^a-z0-9]+", "", str(value).lower())
+
+    def _name_tokens(self, value):
+        return {token for token in re.split(r"[^a-z0-9]+", str(value).lower()) if len(token) >= 3}
+
+    def _match_score(self, monitor_name, container_name):
+        mn = self._normalize_name(monitor_name)
+        cn = self._normalize_name(container_name)
+        if not mn or not cn:
+            return 0
+        if mn == cn:
+            return 100
+        monitor_tokens = self._name_tokens(monitor_name)
+        container_tokens = self._name_tokens(container_name)
+        overlap = len(monitor_tokens & container_tokens)
+        if overlap:
+            return overlap * 10
+        if len(mn) >= 6 and (mn.startswith(cn) or cn.startswith(mn)):
+            return 5
+        return 0
+
+    def _best_container_match(self, monitor_name, docker_ports):
+        best_name = None
+        best_score = 0
+        for container_name in docker_ports.keys():
+            score = self._match_score(monitor_name, container_name)
+            if score > best_score:
+                best_score = score
+                best_name = container_name
+        return best_name if best_score > 0 else None
 
     def _kuma_candidate_urls(self, base_or_endpoint):
         parsed = urllib.parse.urlparse(base_or_endpoint)
@@ -204,11 +264,13 @@ class UptimeKumaScreen:
         docker_ports = docker_ports_map(self.show_docker_ports)
         rows = []
         summary = {"up": 0, "down": 0, "paused": 0, "unknown": 0, "total": len(monitors)}
+        monitor_rows = []
 
         for row in monitors:
             name = str(row.get("name") or row.get("friendly_name") or row.get("monitor_name") or row.get("id") or "unnamed")
             status = self._status_label(row.get("status", row.get("up", row.get("active", row.get("isUp")))))
-            port = resolve_port(name, str(row.get("port") or row.get("monitor_port") or ""), docker_ports)
+            port_hint = self._monitor_port_hint(row)
+            port = resolve_port(name, port_hint, docker_ports)
             if status == "UP":
                 summary["up"] += 1
             elif status == "DOWN":
@@ -217,7 +279,37 @@ class UptimeKumaScreen:
                 summary["paused"] += 1
             else:
                 summary["unknown"] += 1
-            rows.append({"name": name, "status": status, "port": port})
+            monitor_rows.append({"name": name, "status": status, "port": port})
+
+        # Build final rows from Docker first (containers + public ports), using Kuma status when matched.
+        used_containers = set()
+        unmatched_monitor_rows = []
+        for monitor_row in monitor_rows:
+            matched_container = self._best_container_match(monitor_row["name"], docker_ports)
+            if not matched_container:
+                unmatched_monitor_rows.append(monitor_row)
+                continue
+            container_port = docker_ports.get(matched_container, "-")
+            if container_port == "-":
+                unmatched_monitor_rows.append(monitor_row)
+                continue
+            if matched_container in used_containers:
+                unmatched_monitor_rows.append(monitor_row)
+                continue
+            used_containers.add(matched_container)
+            rows.append({"name": matched_container, "status": monitor_row["status"], "port": container_port})
+
+        # Add docker containers that were not in Kuma monitor list, keeping status UNKNOWN.
+        for container_name, container_port in sorted(docker_ports.items()):
+            if container_port == "-":
+                continue
+            if container_name in used_containers:
+                continue
+            rows.append({"name": container_name, "status": "UNKNOWN", "port": container_port})
+
+        # Keep non-docker or URL-based Kuma monitors as fallback rows.
+        for monitor_row in unmatched_monitor_rows:
+            rows.append(monitor_row)
 
         self.cache["summary"] = summary
         self.cache["monitors"] = rows
@@ -229,6 +321,8 @@ class UptimeKumaScreen:
         self.refresh_cache()
         summary = self.cache["summary"]
         monitors = self.cache["monitors"]
+        if self.hide_no_port_rows:
+            monitors = [row for row in monitors if str(row.get("port", "")).strip() not in {"", "-"}]
         error = self.cache["error"]
         updated = self.cache["updated_at"]
 
@@ -254,7 +348,6 @@ class UptimeKumaScreen:
         row_h = 13
         draw.rectangle([8, start_y, W - 9, H - 26], fill=BG_PANEL, outline=BORDER, width=1)
         draw.text((16, start_y + 6), "SERVICE", fill=WHITE_DIM, font=FONT_SMALL)
-        draw.text((302, start_y + 6), "PORT", fill=WHITE_DIM, font=FONT_SMALL)
         draw.text((402, start_y + 6), "STATE", fill=WHITE_DIM, font=FONT_SMALL)
 
         max_rows = min(self.kuma_max_rows, int((H - 26 - (start_y + 22)) / row_h))
@@ -262,8 +355,7 @@ class UptimeKumaScreen:
             y = start_y + 22 + idx * row_h
             status = monitor["status"]
             color = GREEN if status == "UP" else RED if status == "DOWN" else ORANGE
-            draw.text((16, y), monitor["name"][:34], fill=WHITE_DIM, font=FONT_SMALL)
-            draw.text((302, y), str(monitor["port"])[:14], fill=CYAN, font=FONT_SMALL)
+            draw.text((16, y), monitor["name"][:46], fill=WHITE_DIM, font=FONT_SMALL)
             draw.text((402, y), status, fill=color, font=FONT_SMALL)
 
         overflow = len(monitors) - max_rows

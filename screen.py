@@ -69,6 +69,7 @@ def run_dashboard():
     kuma_verify_ssl = _env_bool("KUMA_VERIFY_SSL", True)
     kuma_max_rows = max(4, int(os.getenv("KUMA_MAX_ROWS", "18")))
     show_docker_ports = _env_bool("SHOW_DOCKER_PORTS", True)
+    hide_no_port_rows = _env_bool("HIDE_NO_PORT_ROWS", False)
 
     calibration_mode = _env_bool("CALIBRATION_MODE", False)
     orientation_mode = _env_bool("ORIENTATION_MODE", False)
@@ -83,6 +84,7 @@ def run_dashboard():
         kuma_verify_ssl=kuma_verify_ssl,
         kuma_max_rows=kuma_max_rows,
         show_docker_ports=show_docker_ports,
+        hide_no_port_rows=hide_no_port_rows,
     )
 
     windows = [("RESOURCES", resources_seconds)]
