@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+*.json
+!.env.example
+venv/
+
+# Runtime artifacts
+current_frame.png
+
+# Font files
+*.ttf
+*.ttc
