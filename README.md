@@ -91,3 +91,5 @@ Comandos de diagnóstico rápidos:
 systemctl status tss-my-layouts.service --no-pager -l
 journalctl -u tss-my-layouts.service -f
 ```
+
+Se o display USB não estiver conectado no boot, o processo agora aguarda a conexão e só inicia os dashboards quando o monitor for detectado.

@@ -7,7 +7,7 @@ import time
 from serial import SerialException
 
 from layout import render_calibration_frame, render_orientation_frame
-from shared import Screen, ScreenLockError
+from shared import Screen, ScreenLockError, find_serial_port
 from system_resource import SystemResourceScreen
 from uptime_kuma import UptimeKumaScreen
 
@@ -31,6 +31,15 @@ def _env_bool(name, default):
 
 
 def _new_screen():
+    waiting_for_display = False
+    while find_serial_port() is None:
+        if not waiting_for_display:
+            print("Display not connected. Waiting for USB monitor...")
+            waiting_for_display = True
+        time.sleep(2)
+    if waiting_for_display:
+        print("Display detected. Starting dashboards...")
+
     while True:
         try:
             return Screen()
