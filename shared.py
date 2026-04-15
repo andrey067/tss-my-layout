@@ -16,6 +16,22 @@ try:
 except ImportError:
     fcntl = None
 
+
+def _load_env_file():
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.exists():
+        return
+    with env_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_env_file()
+
 # ── Screen constants ───────────────────────────────────────────
 # Canvas (what you see — landscape)
 W, H = 480, 320
@@ -133,12 +149,12 @@ class Screen:
         # Rotate canvas to match selected orientation mode on physical display.
         if img.size == (W, H):
             rotations = {
-                "landscape": -90,
-                "reverse_landscape": 90,
+                "landscape": 90,
+                "reverse_landscape": -90,
                 "portrait": -90,
                 "reverse_portrait": 90,
             }
-            angle = rotations.get(DISPLAY_MODE, 90)
+            angle = rotations.get(DISPLAY_MODE, -90)
             img = img.rotate(angle, expand=True)
         if img.size != (SCREEN_W, SCREEN_H):
             img = img.resize((SCREEN_W, SCREEN_H))
