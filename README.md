@@ -9,6 +9,7 @@ Baseado em `usb-lcd-dashboard`, reduzido para **2 telas**:
 
 - Python 3.8+
 - Display USB 3.5" (Turing Smart Screen Rev A / CH340)
+- Docker Engine com acesso ao socket `/var/run/docker.sock` (para a tela Docker)
 
 ## Instalação
 
@@ -108,6 +109,7 @@ python3 -m unittest -v test_docker_info.py
 - **Tela bugando/atualizando errado**: confirme que só existe 1 processo usando `/dev/ttyACM0`.
 - **Kuma timeout/401**: use API key em `KUMA_TOKEN` e ajuste `KUMA_TIMEOUT`.
 - **Portas Docker vazias**: validar acesso a `docker ps`.
+- **Tela Docker vazia**: validar permissao do usuario no socket `/var/run/docker.sock` (ex.: grupo `docker`).
 
 Comandos de diagnóstico rápidos:
 

@@ -2,6 +2,21 @@
 
 ## [Modificacoes] - 2026-04-16
 
+### docker_screen.py - Migracao para Docker SDK e status simplificado
+
+**Mudancas aplicadas:**
+- A coleta da tela Docker deixou de usar Docker CLI e passou a usar Docker SDK (`docker-py`).
+- Fonte de dados agora via API do daemon com `client.api.containers(all=True)`.
+- Status exibido foi simplificado para apenas dois valores:
+  - `RUNNING` para containers ativos
+  - `STOP` para qualquer estado nao ativo
+- Coluna de porta passou a exibir somente a **porta publica** (`PublicPort`).
+- Containers sem porta publicada exibem `-`.
+
+**Resultado visual esperado:**
+- Sem mistura de `Up`, `healthy`, `native`.
+- Dashboard padronizado com `CONTAINER | STATUS | PORT`.
+
 ### docker_screen.py - Coleta de status Docker mais confiavel
 
 **Problema observado:**

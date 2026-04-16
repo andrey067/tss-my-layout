@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Docker containers data collection and rendering."""
 
-import subprocess
 import time
 from datetime import datetime
 
+import docker
 from PIL import ImageDraw
 
 from shared import (
@@ -15,7 +15,6 @@ from shared import (
     FONT_TINY,
     GREEN,
     GREEN_DIM,
-    ORANGE,
     PURPLE,
     PURPLE_DIM,
     RED,
@@ -27,98 +26,61 @@ from shared import (
 )
 
 
+def _status_label(raw_status):
+    return "RUNNING" if (raw_status or "").strip().lower() == "running" else "STOP"
+
+
+def _public_port(ports):
+    if not isinstance(ports, list):
+        return "-"
+    collected = []
+    for entry in ports:
+        if not isinstance(entry, dict):
+            continue
+        public_port = entry.get("PublicPort")
+        if public_port is None:
+            continue
+        try:
+            collected.append(int(public_port))
+        except (TypeError, ValueError):
+            continue
+    if not collected:
+        return "-"
+    return str(min(collected))
+
+
 def get_docker_containers():
+    client = None
     try:
-        output = subprocess.check_output(
-            ["docker", "ps", "-a", "--format", "{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Ports}}"],
-            text=True,
-            timeout=5,
-        )
+        client = docker.from_env()
+        items = client.api.containers(all=True)
     except Exception:
         return []
+    finally:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
 
     containers = []
-    container_ids = []
-    for line in output.splitlines():
-        if "|" not in line:
-            continue
-        parts = line.split("|")
-        container_id = parts[0].strip()
-        name = parts[1].strip() if len(parts) > 1 else ""
-        state = parts[2].strip().lower() if len(parts) > 2 else ""
-        status = parts[3].strip() if len(parts) > 3 else ""
-        ports = parts[4].strip() if len(parts) > 4 else ""
-        running = state == "running"
-        container_ids.append(container_id)
-
-        containers.append({
-            "id": container_id,
-            "name": name,
-            "state": state,
-            "status": status,
-            "ports": ports,
-            "health": None,
-            "running": running,
-        })
-
-    health_map = get_container_health_map(container_ids)
-    for container in containers:
-        container["health"] = health_map.get(container["id"])
-
+    for item in items:
+        raw_status = str(item.get("State", "")).strip().lower()
+        status_label = _status_label(raw_status)
+        names = item.get("Names") or []
+        if names and isinstance(names[0], str):
+            name = names[0].lstrip("/")
+        else:
+            name = item.get("Id", "")[:12]
+        containers.append(
+            {
+                "name": name,
+                "status": status_label,
+                "port": _public_port(item.get("Ports") or []),
+                "running": status_label == "RUNNING",
+            }
+        )
     return containers
-
-
-def get_container_health_map(container_ids):
-    if not container_ids:
-        return {}
-    try:
-        result = subprocess.run(
-            [
-                "docker",
-                "inspect",
-                "--format",
-                "{{.Id}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}",
-                *container_ids,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=6,
-        )
-        health_map = {}
-        for line in result.stdout.splitlines():
-            if "|" not in line:
-                continue
-            container_id, health = line.split("|", 1)
-            short_id = container_id.strip()[:12]
-            health = health.strip().lower()
-            if health in ("healthy", "unhealthy", "starting"):
-                health_map[short_id] = health
-            else:
-                health_map[short_id] = None
-        return health_map
-    except Exception:
-        return {}
-
-
-def get_container_uptime(container_name):
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.State.StartedAt}}", container_name],
-            capture_output=True,
-            text=True,
-            timeout=2
-        )
-        started_at = result.stdout.strip()
-        if started_at:
-            from datetime import datetime
-            started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-            uptime = datetime.now().astimezone() - started
-            hours = int(uptime.total_seconds() // 3600)
-            minutes = int((uptime.total_seconds() % 3600) // 60)
-            return f"{hours}h {minutes}m"
-    except Exception:
-        pass
-    return "-"
 
 
 class DockerScreen:
@@ -141,7 +103,12 @@ def render_docker_frame(containers):
 
     draw.rectangle([8, 6, W - 9, 8], fill=PURPLE)
     draw.text((10, 10), "DOCKER CONTAINERS", fill=PURPLE, font=FONT_DATA)
-    draw.text((10, 14), f"{running_count} running / {len(containers)} total", fill=GREEN, font=FONT_TINY)
+    draw.text(
+        (10, 14),
+        f"{running_count} running / {len(containers)} total",
+        fill=GREEN,
+        font=FONT_TINY,
+    )
     draw.rectangle([8, 34, W - 9, 35], fill=PURPLE_DIM)
 
     start_y = 44
@@ -151,39 +118,35 @@ def render_docker_frame(containers):
     draw.rectangle([8, start_y, W - 9, H - 26], outline=BORDER, width=1)
     draw.text((12, start_y + 4), "CONTAINER", fill=WHITE_DIM, font=FONT_SMALL)
     draw.text((200, start_y + 4), "STATUS", fill=WHITE_DIM, font=FONT_SMALL)
-    draw.text((280, start_y + 4), "PORTS", fill=WHITE_DIM, font=FONT_SMALL)
+    draw.text((280, start_y + 4), "PORT", fill=WHITE_DIM, font=FONT_SMALL)
 
     y = start_y + 20
     for i, container in enumerate(containers[:max_rows]):
         name = container["name"][:25]
-        state = (container.get("state") or "unknown").lower()
-        health = container["health"]
-        status_label = health.upper() if health else state.upper()
-        ports = container["ports"][:20] if container["ports"] else "-"
-
-        if state in {"exited", "dead", "removing"}:
-            color = RED
-        elif state in {"restarting", "paused"}:
-            color = ORANGE
-        elif health == "healthy":
-            color = GREEN
-        elif health == "unhealthy":
-            color = RED
-        elif health == "starting":
-            color = ORANGE
-        else:
-            color = CYAN
+        status_label = container.get("status", "STOP")
+        port = container.get("port", "-")[:20]
+        color = GREEN if status_label == "RUNNING" else RED
 
         draw.text((12, y), name, fill=WHITE_DIM, font=FONT_SMALL)
         draw.text((200, y), status_label, fill=color, font=FONT_SMALL)
-        draw.text((280, y), ports, fill=CYAN, font=FONT_TINY)
+        draw.text((280, y), port, fill=CYAN, font=FONT_TINY)
 
         y += row_h
 
     overflow = len(containers) - max_rows
     if overflow > 0:
-        draw.text((12, H - 36), f"+ {overflow} containers hidden", fill=WHITE_DIM, font=FONT_TINY)
+        draw.text(
+            (12, H - 36),
+            f"+ {overflow} containers hidden",
+            fill=WHITE_DIM,
+            font=FONT_TINY,
+        )
 
-    draw.text((12, H - 20), datetime.now().strftime("%H:%M:%S"), fill=GREEN_DIM, font=FONT_TINY)
+    draw.text(
+        (12, H - 20),
+        datetime.now().strftime("%H:%M:%S"),
+        fill=GREEN_DIM,
+        font=FONT_TINY,
+    )
     draw_corners(draw)
     return img
