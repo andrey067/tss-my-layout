@@ -79,15 +79,35 @@ docker run -v /var/run/docker.sock:/var/run/docker.sock:ro
 pip install pyserial Pillow numpy psutil python-socketio
 ```
 
+Com `uv` (recomendado):
+
+```bash
+uv venv .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+```
+
 ## Systemd Service (Opcional)
 
 Para rodar como serviço:
 
 ```bash
-# Copiar para ~/.config/systemd/user/
-cp install_systemd_service.sh ~/.config/systemd/user/tss.service
-systemctl --user enable tss
-systemctl --user start tss
+chmod +x install_systemd_service.sh
+sudo ./install_systemd_service.sh install
+sudo ./install_systemd_service.sh status
+```
+
+### Comportamento do serviço
+
+- Antes de `install`, `start` e `restart`, o script finaliza processos que ainda seguram a porta USB do display.
+- O script tenta usar `SERIAL_PORT` do `.env`; sem isso, tenta `/dev/ttyACM0`, `/dev/ttyACM1` e `/dev/ttyUSB0`.
+- O unit gerado usa `/usr/bin/python3` para evitar erro `203/EXEC` em alguns hosts.
+- O projeto carrega `.env` no runtime, por isso o unit nao precisa de `EnvironmentFile=`.
+
+### Diagnóstico rapido
+
+```bash
+systemctl status tss-my-layouts.service --no-pager -l
+journalctl -u tss-my-layouts.service -f
 ```
 
 ## Verificação

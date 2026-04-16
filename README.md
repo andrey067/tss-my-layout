@@ -19,6 +19,14 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
+Opcional com `uv`:
+
+```bash
+uv venv .venv
+uv pip install --python .venv/bin/python -r requirements.txt
+cp .env.example .env
+```
+
 ## Configuração
 
 No `.env`:
@@ -41,6 +49,14 @@ No `.env`:
 
 ```bash
 ./.venv/bin/python main.py
+```
+
+Ao iniciar, o `main.py` agora finaliza automaticamente processos antigos que ainda estao com a porta USB do display aberta (ex.: `/dev/ttyACM0`) antes de subir o dashboard.
+
+Se quiser executar sem venv:
+
+```bash
+python3 main.py
 ```
 
 ## Organização do código
@@ -71,6 +87,14 @@ sudo ./install_systemd_service.sh stop
 sudo ./install_systemd_service.sh restart
 sudo ./install_systemd_service.sh status
 ```
+
+O script `install_systemd_service.sh` agora também finaliza processos que ainda estejam usando a porta USB do display antes de `install`, `start` e `restart`.
+
+Notas importantes do serviço:
+
+- O unit usa `ExecStart=/usr/bin/python3 /home/fedora/tss/main.py` para evitar falhas `203/EXEC` com path do venv em alguns ambientes.
+- O `main.py` e `shared.py` carregam `.env` diretamente, então o unit não usa `EnvironmentFile=` (evita erro `Failed to load environment files: Permission denied`).
+- Se a tela travar, rode `journalctl -u tss-my-layouts.service -f` para ver logs em tempo real.
 
 ## Testes
 

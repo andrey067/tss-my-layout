@@ -30,49 +30,74 @@ from shared import (
 def get_docker_containers():
     try:
         output = subprocess.check_output(
-            ["docker", "ps", "--format", "{{.Names}}|{{.Status}}|{{.Ports}}"],
+            ["docker", "ps", "-a", "--format", "{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Ports}}"],
             text=True,
-            timeout=4
+            timeout=5,
         )
     except Exception:
         return []
 
     containers = []
+    container_ids = []
     for line in output.splitlines():
         if "|" not in line:
             continue
         parts = line.split("|")
-        name = parts[0].strip()
-        status = parts[1].strip() if len(parts) > 1 else ""
-        ports = parts[2].strip() if len(parts) > 2 else ""
-
-        health = get_container_health(name)
-        running = "Up" in status
+        container_id = parts[0].strip()
+        name = parts[1].strip() if len(parts) > 1 else ""
+        state = parts[2].strip().lower() if len(parts) > 2 else ""
+        status = parts[3].strip() if len(parts) > 3 else ""
+        ports = parts[4].strip() if len(parts) > 4 else ""
+        running = state == "running"
+        container_ids.append(container_id)
 
         containers.append({
+            "id": container_id,
             "name": name,
+            "state": state,
             "status": status,
             "ports": ports,
-            "health": health,
+            "health": None,
             "running": running,
         })
+
+    health_map = get_container_health_map(container_ids)
+    for container in containers:
+        container["health"] = health_map.get(container["id"])
+
     return containers
 
 
-def get_container_health(container_name):
+def get_container_health_map(container_ids):
+    if not container_ids:
+        return {}
     try:
         result = subprocess.run(
-            ["docker", "inspect", "--format", "{{.State.Health.Status}}", container_name],
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.Id}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+                *container_ids,
+            ],
             capture_output=True,
             text=True,
-            timeout=2
+            timeout=6,
         )
-        health = result.stdout.strip()
-        if health in ("healthy", "unhealthy", "starting"):
-            return health
+        health_map = {}
+        for line in result.stdout.splitlines():
+            if "|" not in line:
+                continue
+            container_id, health = line.split("|", 1)
+            short_id = container_id.strip()[:12]
+            health = health.strip().lower()
+            if health in ("healthy", "unhealthy", "starting"):
+                health_map[short_id] = health
+            else:
+                health_map[short_id] = None
+        return health_map
     except Exception:
-        pass
-    return None
+        return {}
 
 
 def get_container_uptime(container_name):
@@ -112,10 +137,11 @@ class DockerScreen:
 def render_docker_frame(containers):
     img = new_frame()
     draw = ImageDraw.Draw(img)
+    running_count = sum(1 for container in containers if container.get("running"))
 
     draw.rectangle([8, 6, W - 9, 8], fill=PURPLE)
     draw.text((10, 10), "DOCKER CONTAINERS", fill=PURPLE, font=FONT_DATA)
-    draw.text((10, 14), f"{len(containers)} running", fill=GREEN, font=FONT_TINY)
+    draw.text((10, 14), f"{running_count} running / {len(containers)} total", fill=GREEN, font=FONT_TINY)
     draw.rectangle([8, 34, W - 9, 35], fill=PURPLE_DIM)
 
     start_y = 44
@@ -124,17 +150,21 @@ def render_docker_frame(containers):
 
     draw.rectangle([8, start_y, W - 9, H - 26], outline=BORDER, width=1)
     draw.text((12, start_y + 4), "CONTAINER", fill=WHITE_DIM, font=FONT_SMALL)
-    draw.text((200, start_y + 4), "HEALTH", fill=WHITE_DIM, font=FONT_SMALL)
+    draw.text((200, start_y + 4), "STATUS", fill=WHITE_DIM, font=FONT_SMALL)
     draw.text((280, start_y + 4), "PORTS", fill=WHITE_DIM, font=FONT_SMALL)
 
     y = start_y + 20
     for i, container in enumerate(containers[:max_rows]):
         name = container["name"][:25]
-        health = container["health"] or "native"
+        state = (container.get("state") or "unknown").lower()
+        health = container["health"]
+        status_label = health.upper() if health else state.upper()
         ports = container["ports"][:20] if container["ports"] else "-"
 
-        if not container["running"]:
+        if state in {"exited", "dead", "removing"}:
             color = RED
+        elif state in {"restarting", "paused"}:
+            color = ORANGE
         elif health == "healthy":
             color = GREEN
         elif health == "unhealthy":
@@ -145,7 +175,7 @@ def render_docker_frame(containers):
             color = CYAN
 
         draw.text((12, y), name, fill=WHITE_DIM, font=FONT_SMALL)
-        draw.text((200, y), health.upper(), fill=color, font=FONT_SMALL)
+        draw.text((200, y), status_label, fill=color, font=FONT_SMALL)
         draw.text((280, y), ports, fill=CYAN, font=FONT_TINY)
 
         y += row_h

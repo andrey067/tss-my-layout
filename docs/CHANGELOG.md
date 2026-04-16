@@ -1,5 +1,58 @@
 # Changelog
 
+## [Modificacoes] - 2026-04-16
+
+### docker_screen.py - Coleta de status Docker mais confiavel
+
+**Problema observado:**
+- O status na tela Docker nao refletia corretamente alguns containers.
+- A leitura usava apenas `docker ps` (somente ativos) e inferencia por string (`"Up" in status`).
+
+**Solucoes implementadas:**
+- Troca para `docker ps -a` com campos estruturados:
+  - `{{.ID}}|{{.Names}}|{{.State}}|{{.Status}}|{{.Ports}}`
+- Uso de `.State` como fonte de verdade para `running`.
+- Coleta de health em lote com uma chamada de `docker inspect` para varios IDs.
+- Ajuste visual da tela:
+  - Cabecalho agora mostra `running / total`.
+  - Coluna passou de `HEALTH` para `STATUS`.
+  - Quando nao ha healthcheck, exibe o `STATE` real (`RUNNING`, `EXITED`, etc.).
+
+### main.py - Limpeza automatica da porta USB no startup
+
+**Mudanca:**
+- Antes de iniciar o dashboard, o `main.py` finaliza processos que ainda seguram a porta serial do display.
+- Fluxo aplicado:
+  - identifica PIDs com `lsof -t <porta>`
+  - envia `SIGTERM`
+  - aguarda curto intervalo
+  - envia `SIGKILL` para remanescentes
+
+### install_systemd_service.sh - Robustez no start/restart
+
+**Mudancas:**
+- O script agora finaliza processos presos na USB antes de `install`, `start` e `restart`.
+- Resolucao da porta usada na limpeza:
+  1. `SERIAL_PORT` no `.env`
+  2. fallback: `/dev/ttyACM0`, `/dev/ttyACM1`, `/dev/ttyUSB0`
+
+**Compatibilidade systemd:**
+- Unit atualizado para usar:
+  - `ExecStart=/usr/bin/python3 /home/fedora/tss/main.py`
+- Removido `EnvironmentFile=` do unit para evitar falha de permissao em alguns hosts.
+- O projeto continua carregando `.env` no runtime via Python.
+
+### Documentacao atualizada
+
+- `README.md`:
+  - instalacao opcional com `uv`
+  - notas de diagnostico systemd
+  - detalhes da limpeza de USB
+- `docs/SETUP.md`:
+  - fluxo de setup com `uv`
+  - secao de comportamento do servico
+  - comandos de diagnostico rapido
+
 ## [Modificações] - 2026-04-15
 
 ### uptime_kuma.py - Migração para Socket.IO
