@@ -10,6 +10,7 @@ from layout import render_calibration_frame, render_orientation_frame
 from shared import Screen, ScreenLockError, find_serial_port
 from system_resource import SystemResourceScreen
 from uptime_kuma import UptimeKumaScreen
+from docker_screen import DockerScreen
 
 
 def _load_env_file():
@@ -82,8 +83,11 @@ def run_dashboard():
 
     calibration_mode = _env_bool("CALIBRATION_MODE", False)
     orientation_mode = _env_bool("ORIENTATION_MODE", False)
+    docker_enabled = _env_bool("DOCKER_ENABLED", True)
+    docker_seconds = max(5, int(os.getenv("DOCKER_SCREEN_SECONDS", "30")))
 
     resource_screen = SystemResourceScreen()
+    docker_screen = DockerScreen()
     kuma_screen = UptimeKumaScreen(
         kuma_enabled=kuma_enabled,
         kuma_url=kuma_url,
@@ -97,6 +101,8 @@ def run_dashboard():
     )
 
     windows = [("RESOURCES", resources_seconds)]
+    if docker_enabled:
+        windows.append(("DOCKER", docker_seconds))
     if kuma_enabled:
         windows.append(("KUMA", kuma_seconds))
 
@@ -110,7 +116,12 @@ def run_dashboard():
             frame = render_calibration_frame()
         else:
             mode = _current_mode(start_time, windows)
-            frame = resource_screen.render() if mode == "RESOURCES" else kuma_screen.render()
+            if mode == "RESOURCES":
+                frame = resource_screen.render()
+            elif mode == "DOCKER":
+                frame = docker_screen.render()
+            else:
+                frame = kuma_screen.render()
 
         try:
             screen.show(frame)

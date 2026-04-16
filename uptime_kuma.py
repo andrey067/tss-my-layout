@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """Uptime Kuma fetch/cache/render logic."""
 
-import base64
 import json
 import re
-import ssl
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime
+
+import socketio
 
 from PIL import ImageDraw
 
@@ -49,7 +46,7 @@ class UptimeKumaScreen:
         hide_no_port_rows=True,
     ):
         self.kuma_enabled = kuma_enabled
-        self.kuma_url = kuma_url
+        self.kuma_url = kuma_url.rstrip("/")
         self.kuma_token = kuma_token
         self.kuma_timeout = kuma_timeout
         self.kuma_poll_interval = kuma_poll_interval
@@ -65,6 +62,9 @@ class UptimeKumaScreen:
             "updated_at": "Never",
             "last_fetch": 0.0,
         }
+        self._sio = None
+        self._monitors_data = []
+        self._info_data = {}
 
     def _monitor_port_hint(self, row):
         direct_candidates = [
@@ -125,29 +125,6 @@ class UptimeKumaScreen:
                 best_name = container_name
         return best_name if best_score > 0 else None
 
-    def _kuma_candidate_urls(self, base_or_endpoint):
-        parsed = urllib.parse.urlparse(base_or_endpoint)
-        if parsed.scheme and parsed.netloc and parsed.path and parsed.path != "/":
-            return [base_or_endpoint]
-        base = base_or_endpoint.rstrip("/")
-        return [
-            f"{base}/metrics",
-            f"{base}/api/monitors",
-            f"{base}/api/monitor",
-            f"{base}/api/status-page/monitor-list",
-        ]
-
-    def _kuma_requests(self):
-        if not self.kuma_token:
-            return [({}, {}, None)]
-        return [
-            ({}, {}, ("", self.kuma_token)),
-            ({"Authorization": f"Api-Key {self.kuma_token}"}, {}, None),
-            ({"X-API-Key": self.kuma_token}, {}, None),
-            ({}, {"apikey": self.kuma_token}, None),
-            ({}, {"api_key": self.kuma_token}, None),
-        ]
-
     def _status_label(self, raw_status):
         if isinstance(raw_status, bool):
             return "UP" if raw_status else "DOWN"
@@ -185,60 +162,61 @@ class UptimeKumaScreen:
                     return nested
         return []
 
-    def _parse_metrics_monitors(self, text):
-        rows = []
-        pattern = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="((?:\\.|[^"\\])*)"')
-        for line in text.splitlines():
-            line = line.strip()
-            if not line.startswith("monitor_status{") or "} " not in line:
-                continue
-            labels_block, value_raw = line.split("} ", 1)
-            labels = labels_block[len("monitor_status{") :]
-            parsed = {k: v.replace('\\"', '"') for k, v in pattern.findall(labels)}
-            name = parsed.get("monitor_name", "")
-            if not name:
-                continue
-            try:
-                status_value = int(float(value_raw.strip()))
-            except ValueError:
-                status_value = -1
-            rows.append(
-                {
-                    "name": name,
-                    "status": status_value,
-                    "monitor_type": parsed.get("monitor_type", "docker"),
-                    "monitor_port": parsed.get("monitor_port", ""),
-                }
-            )
-        return rows
-
     def _fetch_kuma_payload(self):
-        last_error = None
-        ssl_context = ssl.create_default_context() if self.kuma_verify_ssl else ssl._create_unverified_context()
+        import threading
 
-        for candidate in self._kuma_candidate_urls(self.kuma_url):
-            for headers_extra, params_extra, basic_auth in self._kuma_requests():
-                try:
-                    params = urllib.parse.urlencode(params_extra)
-                    url = f"{candidate}?{params}" if params else candidate
-                    headers = {"Accept": "application/json", **headers_extra}
-                    if basic_auth is not None:
-                        token = f"{basic_auth[0]}:{basic_auth[1]}".encode("utf-8")
-                        headers["Authorization"] = f"Basic {base64.b64encode(token).decode('ascii')}"
-                    request = urllib.request.Request(url, headers=headers)
-                    with urllib.request.urlopen(request, timeout=self.kuma_timeout, context=ssl_context) as response:
-                        raw_bytes = response.read()
-                        content_type = response.headers.get("Content-Type", "").lower()
-                    text = raw_bytes.decode("utf-8", errors="replace")
-                    if "json" in content_type or text.lstrip().startswith(("{", "[")):
-                        return candidate, json.loads(text)
-                    monitors = self._parse_metrics_monitors(text)
-                    if monitors:
-                        return candidate, {"monitors": monitors}
-                    raise ValueError("Unsupported response format")
-                except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-                    last_error = exc
-        raise RuntimeError(f"Could not fetch Kuma data from {self.kuma_url}: {last_error}")
+        monitors_data = []
+        heartbeat_data = []
+
+        def do_login(sio):
+            time.sleep(0.3)
+            if self.kuma_token:
+                sio.emit("login", {
+                    "username": "admin",
+                    "password": self.kuma_token
+                })
+
+        try:
+            sio = socketio.Client(reconnection=False, ssl_verify=self.kuma_verify_ssl)
+
+            @sio.on("connect")
+            def on_connect():
+                threading.Thread(target=do_login, args=(sio,)).start()
+
+            @sio.on("monitorList")
+            def on_monitor_list(data):
+                nonlocal monitors_data
+                if isinstance(data, dict):
+                    monitors_data = data
+
+            @sio.on("heartbeat")
+            def on_heartbeat(data):
+                if isinstance(data, dict):
+                    heartbeat_data.append(data)
+
+            sio.connect(self.kuma_url, transports=["polling"], wait_timeout=self.kuma_timeout)
+
+            start = time.time()
+            while time.time() - start < self.kuma_timeout:
+                if monitors_data:
+                    break
+                time.sleep(0.1)
+
+        except Exception as exc:
+            raise RuntimeError(f"Socket.IO error: {exc}")
+        finally:
+            try:
+                sio.disconnect()
+            except Exception:
+                pass
+
+        if monitors_data:
+            hb_map = {h.get("monitorID"): h for h in heartbeat_data if isinstance(h, dict)}
+            for mid, m in monitors_data.items():
+                if mid in hb_map:
+                    m["heartbeat"] = hb_map[mid]
+            return self.kuma_url, {"monitors": list(monitors_data.values())}
+        return self.kuma_url, {"monitors": []}
 
     def refresh_cache(self, force=False):
         now = time.monotonic()
