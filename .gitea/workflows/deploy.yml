@@ -10,7 +10,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     container:
-      image: alpine:3.20
+      image: node:22
     steps:
       - name: Checkout (main, inclui chore(release) e VERSION)
         uses: actions/checkout@v4
@@ -18,7 +18,9 @@ jobs:
           fetch-depth: 0
 
       - name: Install ssh/rsync
-        run: apk add --no-cache openssh rsync
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq openssh-client rsync
 
       - name: Setup deploy key
         run: |
