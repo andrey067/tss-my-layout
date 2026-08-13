@@ -8,13 +8,19 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     container:
-      image: python:3.10-slim
+      image: node:22
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Python
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq python3 python3-pip
+          python3 --version
+
       - name: Install dependencies
-        run: pip install --no-cache-dir -r requirements.txt ruff
+        run: pip3 install --no-cache-dir -r requirements.txt ruff
 
       - name: Syntax check
         run: python3 -m py_compile *.py tests/*.py
