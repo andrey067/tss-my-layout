@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    container:
+      image: python:3.10-slim
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r requirements.txt ruff
+
+      - name: Syntax check
+        run: python3 -m py_compile *.py tests/*.py
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Smoke test
+        run: python3 -m unittest tests/smoke_test.py -v

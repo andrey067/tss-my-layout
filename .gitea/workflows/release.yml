@@ -1,0 +1,31 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  semantic-release:
+    runs-on: ubuntu-latest
+    container:
+      image: node:22
+    env:
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+      GITEA_URL: http://gitea-http:3000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git for push-back
+        run: |
+          git config user.name "gitea-actions"
+          git config user.email "actions@gitea.homelab.local"
+
+      - name: Install semantic-release
+        run: npm install --no-save semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/exec @semantic-release/git @saithodev/semantic-release-gitea
+
+      - name: Run semantic-release
+        run: npx semantic-release

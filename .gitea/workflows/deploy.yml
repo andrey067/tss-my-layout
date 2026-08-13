@@ -1,0 +1,49 @@
+name: deploy
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:3.20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ssh/rsync
+        run: apk add --no-cache openssh rsync
+
+      - name: Setup deploy key
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+
+      - name: Sync project to host
+        run: |
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude '.env' \
+            --exclude 'current_frame.png' \
+            --exclude '__pycache__' \
+            --exclude '.venv' \
+            ./ "${DEPLOY_USER}@${DEPLOY_HOST}:/home/${DEPLOY_USER}/tss/"
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+
+      - name: Restart service
+        run: |
+          ssh "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "sudo systemctl restart tss-my-layouts.service && systemctl is-active tss-my-layouts.service"
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.json
 !.env.example
+!.releaserc.json
 venv/
 
 # Runtime artifacts
