@@ -1,5 +1,15 @@
 # Changelog
 
+## [Modificacoes] - 2026-08-13
+
+### Removido o stack Uptime Kuma/Docker
+
+- Removida a tela `KUMA` de `screen.py` — o dashboard agora roda apenas a tela RESOURCES.
+- Deletados `uptime_kuma.py`, `docker_info.py`, `docker_screen.py` e `test_docker_info.py`.
+- Removidas dependencias `python-socketio` e `docker` de `requirements.txt`.
+- Limpos `KUMA_*`, `SHOW_DOCKER_PORTS` e `HIDE_NO_PORT_ROWS` do `.env.example` e README.
+- Removido `docs/UPTIME_KUMA.md`.
+
 ## [Modificacoes] - 2026-04-16
 
 ### docker_screen.py - Migracao para Docker SDK e status simplificado

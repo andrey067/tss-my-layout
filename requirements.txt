@@ -2,5 +2,3 @@ pyserial
 Pillow
 numpy
 psutil
-python-socketio
-docker

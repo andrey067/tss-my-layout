@@ -1,15 +1,13 @@
-# Dual LCD Dashboard (Resources + Uptime Kuma)
+# LCD Dashboard (Resources)
 
-Baseado em `usb-lcd-dashboard`, reduzido para **2 telas**:
+Baseado em `usb-lcd-dashboard`, reduzido para **1 tela**:
 
-1. **Resources (default landscape)**.
-2. **Uptime Kuma** com API key.
+1. **Resources (default landscape)** — CPU, memória, temperatura, disco, rede e uptime.
 
 ## Requisitos
 
 - Python 3.8+
 - Display USB 3.5" (Turing Smart Screen Rev A / CH340)
-- Docker Engine com acesso ao socket `/var/run/docker.sock` (para a tela Docker)
 
 ## Instalação
 
@@ -33,15 +31,6 @@ cp .env.example .env
 No `.env`:
 
 - `REFRESH_INTERVAL`
-- `RESOURCES_SCREEN_SECONDS`
-- `KUMA_SCREEN_SECONDS`
-- `KUMA_ENABLED`
-- `KUMA_URL`
-- `KUMA_TOKEN`
-- `KUMA_TIMEOUT`
-- `KUMA_POLL_INTERVAL`
-- `KUMA_VERIFY_SSL`
-- `SHOW_DOCKER_PORTS`
 - `DISPLAY_MODE` (`reverse_landscape` recomendado)
 - `CALIBRATION_MODE` (`true` para tela de calibração visual)
 - `ORIENTATION_MODE` (`true` para rodar o teste de orientação do `screen_orientation.py`)
@@ -63,11 +52,9 @@ python3 main.py
 ## Organização do código
 
 - `main.py`: entrypoint
-- `screen.py`: loop principal e troca de telas
+- `screen.py`: loop principal
 - `layout.py`: layouts compartilhados (calibração/orientação)
 - `system_resource.py`: coleta/render de recursos do sistema
-- `uptime_kuma.py`: integração/cache/render do Uptime Kuma
-- `docker_info.py`: parse de portas Docker e resolução por monitor
 - `shared.py`: driver serial, cores, fontes e helpers de desenho
 
 ## Rodar automaticamente no boot (systemd)
@@ -97,19 +84,10 @@ Notas importantes do serviço:
 - O `main.py` e `shared.py` carregam `.env` diretamente, então o unit não usa `EnvironmentFile=` (evita erro `Failed to load environment files: Permission denied`).
 - Se a tela travar, rode `journalctl -u tss-my-layouts.service -f` para ver logs em tempo real.
 
-## Testes
-
-```bash
-python3 -m unittest -v test_docker_info.py
-```
-
 ## Troubleshooting
 
 - **Tela invertida**: ajuste `DISPLAY_MODE` no `.env` (`reverse_landscape` ou `landscape`) e reinicie o serviço.
 - **Tela bugando/atualizando errado**: confirme que só existe 1 processo usando `/dev/ttyACM0`.
-- **Kuma timeout/401**: use API key em `KUMA_TOKEN` e ajuste `KUMA_TIMEOUT`.
-- **Portas Docker vazias**: validar acesso a `docker ps`.
-- **Tela Docker vazia**: validar permissao do usuario no socket `/var/run/docker.sock` (ex.: grupo `docker`).
 
 Comandos de diagnóstico rápidos:
 

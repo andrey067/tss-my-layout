@@ -9,8 +9,6 @@ from serial import SerialException
 from layout import render_calibration_frame, render_orientation_frame
 from shared import Screen, ScreenLockError, find_serial_port
 from system_resource import SystemResourceScreen
-from uptime_kuma import UptimeKumaScreen
-from docker_screen import DockerScreen
 
 
 def _load_env_file():
@@ -51,63 +49,17 @@ def _new_screen():
             time.sleep(2)
 
 
-def _current_mode(start_time, windows):
-    if not windows:
-        return "RESOURCES"
-    total_seconds = sum(seconds for _, seconds in windows)
-    elapsed = (time.monotonic() - start_time) % total_seconds
-    cursor = 0
-    for name, seconds in windows:
-        cursor += seconds
-        if elapsed < cursor:
-            return name
-    return windows[0][0]
-
-
 def run_dashboard():
     _load_env_file()
 
     refresh_interval = max(0.5, float(os.getenv("REFRESH_INTERVAL", "1")))
-    resources_seconds = max(5, int(os.getenv("RESOURCES_SCREEN_SECONDS", "30")))
-    kuma_seconds = max(5, int(os.getenv("KUMA_SCREEN_SECONDS", "30")))
-
-    kuma_enabled = _env_bool("KUMA_ENABLED", True)
-    kuma_url = os.getenv("KUMA_URL", "http://127.0.0.1:3002").strip()
-    kuma_token = os.getenv("KUMA_TOKEN", "").strip()
-    kuma_timeout = max(1, int(os.getenv("KUMA_TIMEOUT", "8")))
-    kuma_poll_interval = max(3, int(os.getenv("KUMA_POLL_INTERVAL", "10")))
-    kuma_verify_ssl = _env_bool("KUMA_VERIFY_SSL", True)
-    kuma_max_rows = max(4, int(os.getenv("KUMA_MAX_ROWS", "18")))
-    show_docker_ports = _env_bool("SHOW_DOCKER_PORTS", True)
-    hide_no_port_rows = _env_bool("HIDE_NO_PORT_ROWS", False)
 
     calibration_mode = _env_bool("CALIBRATION_MODE", False)
     orientation_mode = _env_bool("ORIENTATION_MODE", False)
-    docker_enabled = _env_bool("DOCKER_ENABLED", True)
-    docker_seconds = max(5, int(os.getenv("DOCKER_SCREEN_SECONDS", "30")))
 
     resource_screen = SystemResourceScreen()
-    docker_screen = DockerScreen()
-    kuma_screen = UptimeKumaScreen(
-        kuma_enabled=kuma_enabled,
-        kuma_url=kuma_url,
-        kuma_token=kuma_token,
-        kuma_timeout=kuma_timeout,
-        kuma_poll_interval=kuma_poll_interval,
-        kuma_verify_ssl=kuma_verify_ssl,
-        kuma_max_rows=kuma_max_rows,
-        show_docker_ports=show_docker_ports,
-        hide_no_port_rows=hide_no_port_rows,
-    )
-
-    windows = [("RESOURCES", resources_seconds)]
-    if docker_enabled:
-        windows.append(("DOCKER", docker_seconds))
-    if kuma_enabled:
-        windows.append(("KUMA", kuma_seconds))
 
     screen = _new_screen()
-    start_time = time.monotonic()
 
     while True:
         if orientation_mode:
@@ -115,13 +67,7 @@ def run_dashboard():
         elif calibration_mode:
             frame = render_calibration_frame()
         else:
-            mode = _current_mode(start_time, windows)
-            if mode == "RESOURCES":
-                frame = resource_screen.render()
-            elif mode == "DOCKER":
-                frame = docker_screen.render()
-            else:
-                frame = kuma_screen.render()
+            frame = resource_screen.render()
 
         try:
             screen.show(frame)
