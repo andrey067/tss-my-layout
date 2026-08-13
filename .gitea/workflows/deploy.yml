@@ -1,8 +1,9 @@
 name: deploy
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: ["release"]
+    types: [completed]
   workflow_dispatch:
 
 jobs:
@@ -11,8 +12,10 @@ jobs:
     container:
       image: alpine:3.20
     steps:
-      - name: Checkout
+      - name: Checkout (main, inclui chore(release) e VERSION)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install ssh/rsync
         run: apk add --no-cache openssh rsync
@@ -26,6 +29,12 @@ jobs:
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+
+      - name: Resolve released version
+        id: version
+        run: |
+          TAG=$(git ls-remote --tags origin 'v*' 2>/dev/null | awk '{print $2}' | sed 's#refs/tags/##' | sort -V | tail -1)
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Sync project to host
         run: |
@@ -43,7 +52,9 @@ jobs:
       - name: Restart service
         run: |
           ssh "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "sudo systemctl restart tss-my-layouts.service && systemctl is-active tss-my-layouts.service"
+            "echo '${{ steps.version.outputs.version }}' > /home/${DEPLOY_USER}/tss/.deployed-version && \
+             sudo systemctl restart tss-my-layouts.service && \
+             systemctl is-active tss-my-layouts.service"
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
