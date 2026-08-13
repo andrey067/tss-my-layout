@@ -23,6 +23,7 @@ jobs:
         run: |
           git config user.name "gitea-actions"
           git config user.email "actions@gitea.homelab.local"
+          git checkout -B main origin/main
 
       - name: Install semantic-release
         run: npm install --no-save semantic-release @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/exec @semantic-release/git @saithodev/semantic-release-gitea conventional-changelog-conventionalcommits
