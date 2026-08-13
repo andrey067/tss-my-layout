@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """System resources data collection and rendering."""
 
+import os
 import time
 from collections import deque
 from datetime import datetime
@@ -96,13 +97,23 @@ class SystemResourceScreen:
         return render_resources_frame(stats, self.net_hist)
 
 
+def get_version():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION")
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            version = handle.read().strip()
+        return f"v{version}" if version else ""
+    except OSError:
+        return ""
+
+
 def render_resources_frame(stats, net_hist):
     img = new_frame()
     draw = ImageDraw.Draw(img)
 
     draw.rectangle([8, 6, W - 9, 8], fill=PURPLE)
     draw.text((10, 10), "RESOURCES", fill=PURPLE, font=FONT_BIG)
-    draw.text((145, 14), "LANDSCAPE", fill=GREEN, font=FONT_TINY)
+    draw.text((145, 14), get_version(), fill=GREEN, font=FONT_TINY)
     draw.rectangle([8, 34, W - 9, 35], fill=PURPLE_DIM)
 
     x0, x1 = 8, W - 9
